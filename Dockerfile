@@ -1,13 +1,48 @@
-FROM ubuntu:14.04
+#MariaDB (https://mariadb.org/)
 
-RUN apt-get update
-RUN apt-get install -y  mysql-server
+FROM ubuntu:16.04
+MAINTAINER Ryan Seto <ryanseto@yak.net>
 
-RUN sed -i -e"s/^bind-address\s*=\s*127.0.0.1/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+# Ensure UTF-8
+#RUN locale-gen en_US.UTF-8
 
-ADD run.sh /run.sh
-ADD dump.sql /dump.sql
-RUN chmod +x /run.sh
+# Disable SSH (Not using it at the moment).
+RUN rm -rf /etc/service/sshd /etc/my_init.d/00_regen_ssh_host_keys.sh
 
-ENTRYPOINT ["/bin/bash", "/run.sh"]
+# Install MariaDB from repository.
+RUN echo "deb http://mariadb.mirror.iweb.com/repo/10.3/ubuntu xenial main" > /etc/apt/sources.list.d/mariadb.list && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --force-yes mariadb-server mariadb-server-10.3
 
+# Install other tools.
+RUN DEBIAN_FRONTEND=noninteractive apt-get install -y pwgen inotify-tools
+
+# Clean up APT when done.
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Configure the database to use our data dir.
+RUN sed -i -e 's/^datadir\s*=.*/datadir = \/data/' /etc/mysql/my.cnf
+
+# Configure MariaDB to listen on any address.
+RUN sed -i -e 's/^bind-address/#bind-address/' /etc/mysql/my.cnf
+
+# Change the innodb-buffer-pool-size to 128M (default is 256M).
+# This should make it friendlier to run on low memory servers.
+RUN sed -i -e 's/^innodb_buffer_pool_size\s*=.*/innodb_buffer_pool_size = 128M/' /etc/mysql/my.cnf
+
+EXPOSE 3306
+ADD scripts /scripts
+RUN chmod +x /scripts/start.sh
+RUN touch /firstrun
+
+# Expose our data, log, and configuration directories.
+VOLUME ["/data", "/var/log/mysql", "/etc/mysql"]
+
+# Use baseimage-docker's init system.
+CMD ["/sbin/my_init", "--", "/scripts/start.sh"]
+
+# Define default command.
+CMD ["mysqld_safe"]
+
+# Expose ports.
+EXPOSE 3306
